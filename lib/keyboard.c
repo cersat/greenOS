@@ -1,21 +1,23 @@
 #include "in-out.h"
 #include "keyboard.h"
 
-bool shift = 0;
-bool arrows = 0;
+static bool shift = 0;
+static bool arrows = 0;
 
 static char shift_scancode_to_ascii(u8 scancode) {
     static const char table[128] = {
         ']', 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+',
         '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}',
-        '\n', 131, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\'', '`',
-        129, '\\', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 129, '*',
+        '\n', 131, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+        129, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 133, 132,
         130, ' '
     };
     // 27 escape
     // 131 alt
     // 130 ctrl
     // 129 shift
+    // 132 print screen
+    // 133 pause
 
     return table[scancode];
 }
@@ -25,7 +27,7 @@ static char scancode_to_ascii(u8 scancode) {
         ']', 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
         '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']',
         '\n', 131, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-        129, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 129, 132,
+        129, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 133, 132,
         130, ' '
     };
     // 27 escape
@@ -33,6 +35,7 @@ static char scancode_to_ascii(u8 scancode) {
     // 130 ctrl
     // 129 shift
     // 132 print screen
+    // 133 pause
 
     return table[scancode];
 }
@@ -55,22 +58,21 @@ char read_key(void) {
             continue;
         }
 
-        if (scancode & 0x80) {
-            continue;
-        }
-
         // arrows
         if(scancode == 0xE0) {
             arrows = 1;
             continue;
         }
         if(arrows) {
+            arrows = 0;
             if(scancode == 0x48) return 24;
             if(scancode == 0x50) return 25;
             if(scancode == 0x4D) return 26;
             if(scancode == 0x4B) return 27;
-            arrows = 0;
+            continue;
         }
+
+        if(scancode & 0x80) continue;
 
         // F1
         if (scancode == 0x3B) {

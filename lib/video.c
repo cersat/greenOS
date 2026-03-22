@@ -1,6 +1,9 @@
 #include "in-out.h"
 #include "video.h"
 
+#define VGA_WIDTH 80
+#define VGA_HEIGHT 25
+
 static volatile u8* const VGA = (volatile u8*)0xB8000;
 
 u16 cursor = 0;

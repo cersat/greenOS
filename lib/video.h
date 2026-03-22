@@ -10,8 +10,6 @@ enum {
 
 extern u16 cursor;
 
-#define VGA_WIDTH 80
-#define VGA_HEIGHT 25
 extern int VGA_COLOR;
 
 extern char num[256];

@@ -25,6 +25,7 @@ static u8    ehci_pad[32]  __attribute__((used));
 static qtd_t ehci_qtd[3]   __attribute__((aligned(32)));
 static u8    ehci_buf[512] __attribute__((aligned(4)));
 static u8    setup[8]      __attribute__((aligned(4)));
+static qh_t  ehci_qh_dummy __attribute__((aligned(32)));
 
 static u32 ehci_op;
 
@@ -88,30 +89,36 @@ static void ehci_port_reset(void) {
 }
 
 static void ehci_run_xfer(void) {
-  // сброс ошибок
   ehci_write(0x04, ehci_read(0x04) | (1 << 4) | (1 << 1));
-
-  // выключаем async и periodic
   ehci_write(0x00, ehci_read(0x00) & ~((1 << 5) | (1 << 4)));
+
   u32 timeout = 100000;
   while (timeout--)
     if (!(ehci_read(0x04) & (1 << 15))) break;
 
-  ehci_write(0x18, (u32)&ehci_qh);
-  ehci_write(0x00, ehci_read(0x00) | (1 << 5));
-  ehci_start();
+  ehci_write(0x18, (u32)&ehci_qh_dummy);
 
+  // сначала запускаем контроллер
+  ehci_start();
+  timeout = 100000;
+  while (timeout--)
+    if (!(ehci_read(0x04) & (1 << 12))) break;
+
+  // потом включаем async schedule
+  ehci_write(0x00, ehci_read(0x00) | (1 << 5));
   timeout = 1000000;
   while (timeout--)
     if (ehci_read(0x04) & (1 << 15)) break;
 
-  // ждём завершения передачи
-  timeout = 1000000;
-  while (timeout--)
-    if (ehci_read(0x04) & (1 << 0)) break;
+  write_string("sts: "); print_hex(ehci_read(0x04)); put_char(space);
+  write_string("cmd: "); print_hex(ehci_read(0x00)); put_char(space);
+  write_string("td1: "); print_hex(ehci_qtd[1].token);
 
-  ehci_stop();
-  ehci_write(0x00, ehci_read(0x00) & ~(1 << 5));
+  // ждём td1
+  timeout = 5000000;
+  while (timeout--)
+    if (!(ehci_qtd[1].token & (1 << 7))) break;
+  if (timeout == 0) write_string("td1 timeout ");
 }
 
 static void ehci_get_descriptor(void) {
@@ -136,13 +143,27 @@ static void ehci_get_descriptor(void) {
     (1 << 31) | (0 << 8) | (1 << 7),
     0, 0);
 
-  ehci_qh.hlp      = (u32)&ehci_qh | 2;
+  // dummy QH — голова списка с H-bit
+  ehci_qh_dummy.hlp      = (u32)&ehci_qh | 2;
+  ehci_qh_dummy.epchar   = (1 << 15) | (1 << 13); // H-bit + High Speed
+  ehci_qh_dummy.epcap    = (1 << 29);
+  ehci_qh_dummy.cur_qtd  = 0;
+  ehci_qh_dummy.next_qtd = 1;
+  ehci_qh_dummy.alt_qtd  = 1;
+  ehci_qh_dummy.token    = 0;
+  ehci_qh_dummy.buf[0]   = 0;
+  ehci_qh_dummy.buf[1]   = 0;
+  ehci_qh_dummy.buf[2]   = 0;
+  ehci_qh_dummy.buf[3]   = 0;
+  ehci_qh_dummy.buf[4]   = 0;
+
+  // рабочий QH — без H-bit, указывает обратно на dummy
+  ehci_qh.hlp      = (u32)&ehci_qh_dummy | 2;
   ehci_qh.epchar   = (0 << 0)  |
                      (0 << 8)  |
                      (1 << 13) |
                      (1 << 14) |
-                     (1 << 15) |
-                     (64 << 16);
+                     (64 << 16); // без H-bit!
   ehci_qh.epcap    = (1 << 29);
   ehci_qh.cur_qtd  = 0;
   ehci_qh.next_qtd = (u32)&ehci_qtd[0];
