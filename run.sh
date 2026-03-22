@@ -36,6 +36,6 @@ qemu-system-i386 \
   -device usb-storage,bus=ehci.0,drive=stick \
   -drive if=none,id=stick,format=raw,file=disk.img
 
-rm -f *.bin kernel.o kernel.elf
+rm -f *.bin *.o *.elf
 
 echo "emulation ended"

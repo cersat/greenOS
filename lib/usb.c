@@ -53,7 +53,7 @@ static void ehci_start(void) {
 static void qtd_init(qtd_t *td, u32 next, u32 token, void *buf, u16 len) {
   td->next     = next;
   td->alt_next = 1;
-  td->token    = token | ((u32)len << 16);
+  td->token    = token | ((u32)len << 16) | (3 << 10); // CErr = 3
   td->buf[0]   = (u32)buf;
   td->buf[1]   = 0;
   td->buf[2]   = 0;
@@ -81,9 +81,10 @@ static void ehci_port_reset(void) {
 
   ehci_write(0x44, ehci_read(0x44) & ~(1 << 8));
 
-  // ждём после сброса
+  // ждём port enabled (бит 2)
   timeout = 1000000;
-  while (timeout--);
+  while (timeout--)
+    if (ehci_read(0x44) & (1 << 2)) break;
 }
 
 static void ehci_run_xfer(void) {
@@ -104,9 +105,10 @@ static void ehci_run_xfer(void) {
   while (timeout--)
     if (ehci_read(0x04) & (1 << 15)) break;
 
+  // ждём завершения передачи
   timeout = 1000000;
   while (timeout--)
-    if (!(ehci_qtd[1].token & (1 << 7))) break;
+    if (ehci_read(0x04) & (1 << 0)) break;
 
   ehci_stop();
   ehci_write(0x00, ehci_read(0x00) & ~(1 << 5));
@@ -154,12 +156,6 @@ static void ehci_get_descriptor(void) {
 
   ehci_run_xfer();
 
-  write_string("desc: ");
-  for (int i = 0; i < 18; i++) {
-    print_hex(ehci_buf[i]);
-    put_char(space);
-  }
-
   if (ehci_read(0x04) & (1 << 1)) write_string("USB Error Interrupt ");
   if (ehci_read(0x04) & (1 << 4)) write_string("Host System Error ");
   for (int i = 0; i < 3; i++) {
@@ -167,9 +163,28 @@ static void ehci_get_descriptor(void) {
     if (ehci_qtd[i].token & (1 << 4)) { write_string("Babble Detected in "); print_hex(i); put_char(space); }
     if (ehci_qtd[i].token & (1 << 5)) { write_string("Data Buffer Error in "); print_hex(i); put_char(space); }
   }
+  write_string("desc: ");
+  for (int i = 0; i < 18; i++) {
+    print_hex(ehci_buf[i]);
+    put_char(space);
+  }
 }
 
 void ehci_init(void) {
+  // останавливаем companion UHCI контроллеры
+  for (u16 b = 0; b < 256; b++)
+  for (u16 s = 0; s < 32; s++)
+  for (u8 f = 0; f < 8; f++) {
+    u32 val = pci_read(b, s, f, 0x08);
+    u8 class    = (val >> 24) & 0xFF;
+    u8 subclass = (val >> 16) & 0xFF;
+    u8 progif   = (val >>  8) & 0xFF;
+    if (class == 0x0C && subclass == 0x03 && progif == 0x00) {
+      u32 uhci_bar = pci_read(b, s, f, 0x20) & ~0x3;
+      outw(uhci_bar + 0, 0x0002); // UHCI CMD: Host Controller Reset
+    }
+  }
+
   u16 bus, slot;
   u8 func = 0;
   u32 bar0 = 0;
@@ -182,8 +197,15 @@ void ehci_init(void) {
     u8 subclass = (val >> 16) & 0xFF;
     u8 progif   = (val >>  8) & 0xFF;
     if (class == 0x0C && subclass == 0x03 && progif == 0x20) {
-      bar0 = pci_read(bus, slot, func, 0x10) & ~0xF;
-      goto found;
+      u32 b0 = pci_read(bus, slot, func, 0x10) & ~0xF;
+      u8 capl = *(volatile u8*)b0;
+      u32 op = b0 + capl;
+      u32 ps = *(volatile u32*)(op + 0x44);
+      if (ps & 1) { // Connected
+        write_string("slot: "); print_dec(slot);
+        bar0 = b0;
+        goto found;
+      }
     }
   }
 
@@ -205,43 +227,15 @@ found:
       if (!(pci_read(bus, slot, func, eecp) & (1 << 16))) break;
   }
 
-  // сброс контроллера
-  ehci_write(0x00, ehci_read(0x00) & ~1);
-  u32 timeout = 100000;
-  while (timeout--)
-    if (ehci_read(0x04) & (1 << 12)) break;
-  ehci_write(0x00, ehci_read(0x00) | (1 << 1));
-  timeout = 100000;
-  while (timeout--)
-    if (!(ehci_read(0x00) & (1 << 1))) break;
+  ehci_write(0x10, 0);        // CTRLDSSEGMENT = 0
+  ehci_write(0x08, 0);        // USBINTR = 0
+  ehci_write(0x14, 0);        // PERIODICLISTBASE = 0
+  ehci_start();               // Run/Stop = 1 — сначала запускаем!
+  ehci_write(0x40, 1);        // CONFIGFLAG = 1 — потом переключаем порты
 
-  // настройка после сброса
-  ehci_write(0x10, 0); // CTRLDSSEGMENT = 0
-  ehci_write(0x08, 0); // USBINTR = 0
-  ehci_write(0x14, 0); // PERIODICLISTBASE = 0
-  ehci_write(0x40, 1); // CONFIGFLAG — порты переходят к EHCI
-
-  // ждём переключения портов
-  timeout = 1000000;
-  while (timeout--);
-
-  // после сброса контроллера, перед ehci_port_reset
-  write_string("cmd: ");        print_hex(ehci_read(0x00));               put_char(space);
-  write_string("sts: ");        print_hex(ehci_read(0x04));               put_char(space);
-  write_string("intr: ");       print_hex(ehci_read(0x08));               put_char(space);
-  write_string("frindex: ");    print_hex(ehci_read(0x0C));               put_char(space);
-  write_string("ctrlds: ");     print_hex(ehci_read(0x10));               put_char(space);
-  write_string("periodic: ");   print_hex(ehci_read(0x14));               put_char(space);
-  write_string("async: ");      print_hex(ehci_read(0x18));               put_char(space);
-  write_string("cfgflag: ");    print_hex(ehci_read(0x40));               put_char(space);
-  write_string("portsc: ");     print_hex(ehci_read(0x44));               put_char(space);
-  write_string("hcsparams: ");  print_hex(*(volatile u32*)(bar0 + 0x04)); put_char(space);
-  write_string("hccparams: ");  print_hex(*(volatile u32*)(bar0 + 0x08)); put_char(space);
-  write_string("caplength: ");  print_hex(*(volatile u8*)bar0);           put_char(space);
-  write_string("bar0: ");       print_hex(bar0);                          put_char(space);
-  write_string("ehci_op: ");    print_hex(ehci_op);
+  u32 delay = 1000000;
+  while (delay--);
 
   ehci_port_reset();
-
   ehci_get_descriptor();
 }

@@ -20,6 +20,7 @@ extern int count;
 void move_cursor(void);
 void del_symbol(void);
 void clear_screen(void);
+void print_dec(u32 value);
 void print_bin(u32 value);
 void print_bin16(u16 value);
 void print_bin8(u8 value);

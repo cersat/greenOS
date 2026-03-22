@@ -566,6 +566,7 @@ void kmain(void) {
         num[count] = c;
         count++;
         if (c == 9) {
+            count--;
             for (int i = 0; i < tab_len; i++) {
                 num[count] = ' ';
                 count++;
