@@ -126,7 +126,7 @@ void Cpanic(char *err) {
     write_string(err);
     put_char('\n');
     write_string("press any key to reboot");
-    char u = read_key();
+    wait_keypress();
     outb(0x64, 0xFE);
 
 }
@@ -318,7 +318,7 @@ void strcat(char *buffer, const char *str1, const char *str2) {
     buffer[i] = '\0';
 }
 
-
+void exception_handler_c(void) __attribute__((interputt));
 void exception_handler_c(void) {
     char buf[8];
     int_to_str(exception_number, buf, sizeof(buf));
@@ -371,7 +371,7 @@ void scan_pci(void) {
             write_string(" VEND:");
             int_to_str(vendor_id,buf,sizeof(buf));
             write_string(buf);
-            char u = read_key();
+            wait_keypress();
         }
     }
 }
@@ -448,7 +448,7 @@ void execute_command(command comm) {
                     put_char('-');  // непечатаемые
                 }
             }
-            char u = read_key();
+            char u = read_key(0);
             if (u == 27) break;
             write_string("|\n");
         }
@@ -474,7 +474,7 @@ void execute_command(command comm) {
 
         put_char('\n');
         int i = 0;
-        for (char c; c != 27; c = read_key()) {
+        for (char c; c != 27; c = read_key(1)) {
             sector_buffer[i] = c;
             put_char(c);
             i++;
@@ -548,13 +548,13 @@ void kmain(void) {
     put_char(space);
 
     write_string("greenOS bootloader\npress any key to boot");
-    char u = read_key();
+    wait_keypress();
     clear_screen();
     VGA_COLOR = 0x02;
 
     write_string("greenOS\n>");
     for (;;) {
-        char c = read_key();
+        char c = read_key(1);
         if (c == '\b') {
             if (count > 0) {
                 count--;

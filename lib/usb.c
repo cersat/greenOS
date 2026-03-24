@@ -104,6 +104,9 @@ static void ehci_run_xfer(void) {
   while (timeout--)
     if (!(ehci_read(0x04) & (1 << 12))) break;
 
+  // Если компилятор GCC/Clang
+  __asm__ __volatile__ ("wbinvd" : : : "memory"); 
+
   // потом включаем async schedule
   ehci_write(0x00, ehci_read(0x00) | (1 << 5));
   timeout = 1000000;
@@ -147,8 +150,8 @@ static void ehci_get_descriptor(void) {
   ehci_qh_dummy.hlp      = (u32)&ehci_qh | 2;
   ehci_qh_dummy.epchar   = (1 << 15) | (1 << 13); // H-bit + High Speed
   ehci_qh_dummy.epcap    = (1 << 29);
-  ehci_qh_dummy.cur_qtd  = 0;
-  ehci_qh_dummy.next_qtd = 1;
+  ehci_qh_dummy.cur_qtd  = (u32)&ehci_qtd[0];
+  ehci_qh_dummy.next_qtd = 0;
   ehci_qh_dummy.alt_qtd  = 1;
   ehci_qh_dummy.token    = 0;
   ehci_qh_dummy.buf[0]   = 0;
@@ -175,10 +178,13 @@ static void ehci_get_descriptor(void) {
   ehci_qh.buf[3]   = 0;
   ehci_qh.buf[4]   = 0;
 
+  print_hex(ehci_read(0x44));
+
   ehci_run_xfer();
 
   if (ehci_read(0x04) & (1 << 1)) write_string("USB Error Interrupt ");
   if (ehci_read(0x04) & (1 << 4)) write_string("Host System Error ");
+  if (ehci_qtd[1].token & (1 << 7)) { write_string("Controller Ignore in 1"); put_char(space); }
   for (int i = 0; i < 3; i++) {
     if (ehci_qtd[i].token & (1 << 3)) { write_string("Transaction Error in "); print_hex(i); put_char(space); }
     if (ehci_qtd[i].token & (1 << 4)) { write_string("Babble Detected in "); print_hex(i); put_char(space); }
@@ -225,6 +231,8 @@ void ehci_init(void) {
       if (ps & 1) { // Connected
         write_string("slot: "); print_dec(slot);
         bar0 = b0;
+        u32 pci_cmd = pci_read(bus, slot, func, 0x04);
+        pci_write(bus, slot, func, 0x04, pci_cmd | 0x06); // 0x04 - BM, 0x02 - Memory Space
         goto found;
       }
     }

@@ -1,14 +1,14 @@
 #include "in-out.h"
 #include "keyboard.h"
 
-static bool shift = 0;
-static bool arrows = 0;
+static u8 shift = 0;
+static u8 arrows = 0;
 
 static char shift_scancode_to_ascii(u8 scancode) {
     static const char table[128] = {
         ']', 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+',
         '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}',
-        '\n', 131, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+        '\a', 131, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
         129, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 133, 132,
         130, ' '
     };
@@ -39,8 +39,23 @@ static char scancode_to_ascii(u8 scancode) {
 
     return table[scancode];
 }
+void wait_keypress(void) {
+    for(;;) {
+        if((inb(0x64) & 1) == 0) continue;
+        break;
+    }
+}
 
-char read_key(void) {
+char choice(char *choices) {
+    u8 length = 0;
+    for(length; choices[length]; length++);
+    for(;;) {
+        char c = read_key(0);
+        for(int i = 0; i < length; i++) if(choices[i] == c) return choices[i];
+    }
+}
+
+char read_key(u8 functions) {
     for (;;) {
         if ((inb(0x64) & 1) == 0) {
             continue;
@@ -75,12 +90,12 @@ char read_key(void) {
         if(scancode & 0x80) continue;
 
         // F1
-        if (scancode == 0x3B) {
+        if (scancode == 0x3B && functions) {
             int number = 0;
             char key;
 
             for (;;) {
-                key = read_key();
+                key = read_key(0);
 
                 if (key >= '0' && key <= '9') {
                     number = number * 10 + (key - '0');
@@ -94,13 +109,13 @@ char read_key(void) {
         }
 
         // F2
-        if (scancode == 0x3C) {
+        if (scancode == 0x3C && functions) {
             
             continue;
         }
 
         // F5
-        if (scancode == 0x3F) {
+        if (scancode == 0x3F && functions) {
             outb(0x64, 0xFE);
             continue;
         }

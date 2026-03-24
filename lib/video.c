@@ -95,15 +95,8 @@ void print_bin(u32 value) {
     }
 }
 
-void print_bin16(u16 value) {
-    for(int i = 15; i >= 0; i--) {
-        u32 bit = (value >> i) & 1;
-        put_char(bit + '0');
-    }
-}
-
-void print_bin8(u8 value) {
-    for(int i = 7; i >= 0; i--) {
+void print_bit(u32 value, u8 bits) {
+    for(int i = bits - 1; i >= 0; i--) {
         u32 bit = (value >> i) & 1;
         put_char(bit + '0');
     }
