@@ -165,7 +165,7 @@ static void ehci_get_descriptor(void) {
   ehci_qh.hlp      = (u32)&ehci_qh_dummy | 2;
   ehci_qh.epchar   = (0 << 0)  |
                      (0 << 8)  |
-                     (1 << 12) |
+                     (1 << 13) |
                      (1 << 14) |
                      (64 << 16); // без H-bit!
   ehci_qh.epcap    = (1 << 29);

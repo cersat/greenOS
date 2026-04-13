@@ -1,5 +1,7 @@
 #include "in-out.h"
 
+u32 osc = 16777183; 
+
 inline void outb(u16 port, u8 value) {
     __asm__ __volatile__("outb %0, %1" : : "a"(value), "Nd"(port));
 }

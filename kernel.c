@@ -44,7 +44,7 @@ u8 sector_buffer[512];
 
 void int_to_str(int n, char* buf, int size);
 static void delay(unsigned int ms);
-static void ahci_read_sector(u64 lba);
+static void read_sector(u64 lba);
 extern void split_command(char* input, char** cmd, char** args);
 
 void *memset(void *dest, int val, unsigned int n)
@@ -138,7 +138,7 @@ void Cpanic(char *err) {
 }
 
 void run_script(u32 sector) {
-    ahci_read_sector((u64)sector);               // читаем сектор в sector_buffer
+    read_sector((u64)sector);               // читаем сектор в sector_buffer
 
     char rnum[128];
     int rcount = 0;// счетчик символов в rnum
@@ -395,8 +395,8 @@ void execute(void) {
     execute_command(comm);
 }
 
-void ahci_read_sector(u64 lba) {
-
+void read_sector(u64 lba) {
+    // Заглушка
 }
 
 void execute_command(command comm) {
@@ -420,7 +420,7 @@ void execute_command(command comm) {
     }
     if (strcmp(comm.cmd, "dumb") == 0) {
         put_char('\n');
-        ahci_read_sector((u64)read_select);  // читаем сектор в buffer
+        read_sector((u64)read_select);  // читаем сектор в buffer
 
         for (int i = 0; i < 512; i += 16) {  // выводим по 16 байт на строку
             char line[80];
@@ -507,7 +507,7 @@ void execute_command(command comm) {
     if (strcmp(comm.cmd, "read") == 0) {
         for (int i = 0; i < 512; i++)
             sector_buffer[i] = 0;
-        ahci_read_sector(read_select);
+        read_sector(read_select);
         put_char('\n');
         for(int i = 0; i < 512; i++) 
             if(sector_buffer[i]) put_char(sector_buffer[i]);

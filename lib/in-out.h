@@ -6,6 +6,8 @@ typedef unsigned short     u16;
 typedef unsigned int       u32;
 typedef unsigned long long u64;
 
+extern u64 osc;
+
 void outb(u16 port, u8 value);
 u8 inb(u16 port);
 
