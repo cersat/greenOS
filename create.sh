@@ -10,10 +10,10 @@ i686-elf-gcc \
   -ffreestanding -m32 \
   -fno-stack-protector -fno-pic \
   -c kernel.c -o kernel.o \
-  -Wbuiltin-declaration-mismatch
+  -Wbuiltin-declaration-mismatch \
+  -mgeneral-regs-only
 
 # 2. Компиляция библиотек
-i686-elf-gcc -c kernel.c -o kernel.o
 i686-elf-gcc -c lib/in-out.c -o in-out.o
 i686-elf-gcc -c lib/video.c -o video.o
 i686-elf-gcc -c lib/keyboard.c -o keyboard.o

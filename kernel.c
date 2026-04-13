@@ -27,6 +27,12 @@ typedef struct {
     int runner;
 } command;
 
+typedef struct {
+  u32 ip;
+  u32 cs;
+  u32 flags;
+} interrupt_frame;
+
 void execute_command(command comm);
 
 // Глобальная переменная для номера исключения
@@ -318,8 +324,7 @@ void strcat(char *buffer, const char *str1, const char *str2) {
     buffer[i] = '\0';
 }
 
-void exception_handler_c(void) __attribute__((interputt));
-void exception_handler_c(void) {
+void __attribute__((interrupt)) exception_handler_c(struct interrupt_frame *frame) {
     char buf[8];
     int_to_str(exception_number, buf, sizeof(buf));
     

@@ -4,13 +4,13 @@
 static u8 shift = 0;
 static u8 arrows = 0;
 
-static char shift_scancode_to_ascii(u8 scancode) {
+static unsigned char shift_scancode_to_ascii(u8 scancode) {
     static const char table[128] = {
         ']', 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+',
         '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}',
         '\a', 131, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
         129, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 133, 132,
-        130, ' '
+        130, 255
     };
     // 27 escape
     // 131 alt
@@ -22,7 +22,7 @@ static char shift_scancode_to_ascii(u8 scancode) {
     return table[scancode];
 }
 
-static char scancode_to_ascii(u8 scancode) {
+static unsigned char scancode_to_ascii(u8 scancode) {
     static const char table[128] = {
         ']', 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
         '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']',
@@ -55,7 +55,7 @@ char choice(char *choices) {
     }
 }
 
-char read_key(u8 functions) {
+unsigned char read_key(u8 functions) {
     for (;;) {
         if ((inb(0x64) & 1) == 0) {
             continue;
@@ -92,7 +92,7 @@ char read_key(u8 functions) {
         // F1
         if (scancode == 0x3B && functions) {
             int number = 0;
-            char key;
+            unsigned char key;
 
             for (;;) {
                 key = read_key(0);
@@ -120,7 +120,7 @@ char read_key(u8 functions) {
             continue;
         }
 
-        char c;
+        u8 c;
         if (shift)
             c = shift_scancode_to_ascii(scancode);
         else

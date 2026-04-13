@@ -3,3 +3,5 @@
 getFiles.sh
 disk.img
 os-image.bin
+*.bin
+*.elf

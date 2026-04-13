@@ -115,6 +115,7 @@ static void ehci_run_xfer(void) {
 
   write_string("sts: "); print_hex(ehci_read(0x04)); put_char(space);
   write_string("cmd: "); print_hex(ehci_read(0x00)); put_char(space);
+  write_string("td0: "); print_hex(ehci_qtd[0].token); put_char(space);
   write_string("td1: "); print_hex(ehci_qtd[1].token);
 
   // ждём td1
@@ -150,8 +151,8 @@ static void ehci_get_descriptor(void) {
   ehci_qh_dummy.hlp      = (u32)&ehci_qh | 2;
   ehci_qh_dummy.epchar   = (1 << 15) | (1 << 13); // H-bit + High Speed
   ehci_qh_dummy.epcap    = (1 << 29);
-  ehci_qh_dummy.cur_qtd  = (u32)&ehci_qtd[0];
-  ehci_qh_dummy.next_qtd = 0;
+  ehci_qh_dummy.cur_qtd  = 0;
+  ehci_qh_dummy.next_qtd = 1;
   ehci_qh_dummy.alt_qtd  = 1;
   ehci_qh_dummy.token    = 0;
   ehci_qh_dummy.buf[0]   = 0;
@@ -164,7 +165,7 @@ static void ehci_get_descriptor(void) {
   ehci_qh.hlp      = (u32)&ehci_qh_dummy | 2;
   ehci_qh.epchar   = (0 << 0)  |
                      (0 << 8)  |
-                     (1 << 13) |
+                     (1 << 12) |
                      (1 << 14) |
                      (64 << 16); // без H-bit!
   ehci_qh.epcap    = (1 << 29);
@@ -179,6 +180,7 @@ static void ehci_get_descriptor(void) {
   ehci_qh.buf[4]   = 0;
 
   print_hex(ehci_read(0x44));
+  write_string("td1 tok before: "); print_hex(ehci_qtd[1].token);
 
   ehci_run_xfer();
 

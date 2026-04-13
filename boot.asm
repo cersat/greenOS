@@ -2,7 +2,7 @@ bits 16
 org 0x7C00
 
 %ifndef KERNEL_SECTORS
-%define KERNEL_SECTORS 25
+%define KERNEL_SECTORS 50
 %endif
 
 KERNEL_LOAD_SEG equ 0x1000
