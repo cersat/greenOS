@@ -22,6 +22,7 @@ real_start:
     sti
     
     mov [boot_drive], dl
+    mov [0x0500], dl           ; boot drive для kernel (INT13h трамплин)
     mov si, loading_msg
     call print
 
@@ -72,9 +73,15 @@ error_msg   db 'Disk read error', 0
 
 align 8
 gdt_start:
-    dq 0x0000000000000000
-    dq 0x00CF9A000000FFFF
-    dq 0x00CF92000000FFFF
+    dq 0x0000000000000000                        ; 0x00 null
+    dw 0xFFFF, 0x0000
+    db 0x00, 10011010b, 11001111b, 0x00           ; 0x08 32-bit flat code
+    dw 0xFFFF, 0x0000
+    db 0x00, 10010010b, 11001111b, 0x00           ; 0x10 32-bit flat data
+    dw 0xFFFF, 0x0000
+    db 0x00, 10011010b, 00000000b, 0x00           ; 0x18 16-bit code, limit 64K
+    dw 0xFFFF, 0x0000
+    db 0x00, 10010010b, 00000000b, 0x00           ; 0x20 16-bit data, limit 64K
 gdt_end:
 
 gdt_descriptor:
@@ -83,6 +90,8 @@ gdt_descriptor:
 
 CODE_SEL equ 0x08
 DATA_SEL equ 0x10
+CODE16_SEL equ 0x18
+DATA16_SEL equ 0x20
 
 [bits 32]
 protected_mode:

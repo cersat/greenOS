@@ -4,6 +4,7 @@
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 
+u8 automs = 0;
 static volatile u8* const VGA = (volatile u8*)0xB8000;
 
 u16 cursor = 0;
@@ -37,9 +38,52 @@ void clear_screen(void) {
     move_cursor();
 }
 
+static inline void ser_putc(char c){
+    while(!(inb(0x3F9-1+5) & 0x20)) {}
+    outb(0x3F8, (u8)c);
+}
+static u8 ser_ready = 0;
+
+void set_char(u8 x, u8 y, char c) {
+    u16 pos = y * VGA_WIDTH + x;
+    VGA[pos * 2] = (u8)c;
+    VGA[pos * 2 + 1] = VGA_COLOR;
+}
+
+char get_char(u8 x, u8 y) {
+    u16 pos = y * VGA_WIDTH + x;
+    return (char)VGA[pos * 2];
+}
+
+void move_screen() {
+    // 1. Сдвигаем все строки (начиная со второй, j = 1) на одну строку вверх
+    for (u8 j = 1; j < VGA_HEIGHT; j++) {
+        for (u8 i = 0; i < VGA_WIDTH; i++) {
+            // Копируем символ из текущей строки j в строку выше (j - 1)
+            set_char(i, j - 1, get_char(i, j));
+        }
+    }
+
+    // 2. Очищаем самую нижнюю строку, чтобы она не дублировалась
+    for (u8 i = 0; i < VGA_WIDTH; i++) {
+        set_char(i, VGA_HEIGHT - 1, ' '); // Записываем пробел (или 0)
+    }
+}
+
 void put_char(char c) {
+    if(!ser_ready){
+        outb(0x3F8+1,0x00); outb(0x3F8+3,0x80); outb(0x3F8+0,0x03);
+        outb(0x3F8+1,0x00); outb(0x3F8+3,0x03); outb(0x3F8+2,0xC7); outb(0x3F8+4,0x0B);
+        ser_ready = 1;
+    }
+    ser_putc(c);
     if (c == '\n') {
-        cursor += (VGA_WIDTH - (cursor % VGA_WIDTH));
+        if (automs && cursor >= VGA_WIDTH * VGA_HEIGHT) {
+            move_screen();
+            cursor -= VGA_WIDTH; // остаёмся на последней строке, а не улетаем за экран
+        } else { // move_screen() УЖЕ двигает строку
+            cursor += (VGA_WIDTH - (cursor % VGA_WIDTH));
+        }
     } else {
         VGA[cursor * 2] = (u8)c;
         VGA[cursor * 2 + 1] = VGA_COLOR;
@@ -47,7 +91,7 @@ void put_char(char c) {
     }
 
     if (cursor >= VGA_WIDTH * VGA_HEIGHT) {
-        cursor = 0;
+        cursor = 0; // если automs выключен - старое поведение, обрезаем в 0
     }
 
     move_cursor();

@@ -1,7 +1,9 @@
 #include "lib/in-out.h"
 #include "lib/keyboard.h"
 #include "lib/video.h"
-#include "lib/usb.h"
+#include "lib/disk.h"
+#include "lib/string.h"
+#include "lib/fs.h"
 
 // В начало файла, после #include
 extern void isr13(void);
@@ -28,6 +30,11 @@ typedef struct {
 } command;
 
 typedef struct {
+    int (*func_ptr)(char*);
+    char* name;
+} run_cmd;
+
+typedef struct {
   u32 ip;
   u32 cs;
   u32 flags;
@@ -47,58 +54,6 @@ static void delay(unsigned int ms);
 static void read_sector(u64 lba);
 extern void split_command(char* input, char** cmd, char** args);
 
-void *memset(void *dest, int val, unsigned int n)
-{
-    unsigned char *ptr = (unsigned char*)dest;
-
-    while(n--)
-        *ptr++ = (unsigned char)val;
-
-    return dest;
-}
-
-void *memcpy(void *dest, const void *src, unsigned int n) {
-
-    unsigned char *d = dest;
-    const unsigned char *s = src;
-
-    while(n--) {
-        *d++ = *s++;
-    }
-
-    return dest;
-}
-
-void ata_wait(void) {
-    while (1) {
-        u8 s = inb(0x1F7);
-
-        if (s & 0x01) return;
-        if (!(s & 0x80) && (s & 0x08)) return;
-    }
-}
-
-int strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return (int)(*s1) - (int)(*s2);
-}
-
-u8 string_to_hex(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';      // '0' это 48, '1' это 49 и т.д.
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10; // 'a' становится 10
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10; // 'A' становится 10
-    }
-    return 0; // Если символ не hex-цифра
-}
-
 char hex_to_char(int c) {
     if (c >= 0 && c <= 9) return c + '0';      // '0' это 48, '1' это 49 и т.д.
     return c + 'a' - 10;
@@ -112,12 +67,6 @@ int length(const char* str) {
     }
 
     return len;
-}
-
-
-
-void write_sector(u32 lba) {
-    // Заглушка, ата не используется
 }
 
 void Cpanic(char *err) __attribute__((noreturn));
@@ -192,7 +141,7 @@ void run_script(u32 sector) {
 void split_command(char* input, char** cmd, char** args) {
     *cmd = input;
     *args = 0;
-    bool space = 0;
+    u8 space = 0;
     int j = 0;
     for(j; input[j]; j++) {
         if(input[j] != ' ') continue;
@@ -214,114 +163,29 @@ void split_command(char* input, char** cmd, char** args) {
     }
 }
 
-// n - число, buf - массив для результата, size - размер буфера
-// Функция пишет строку вида "0A", "FF" и т.д.
-void hex_to_str(u8 n, char* buf, int size) {
-    if (size < 3) { // нужно как минимум 2 символа + '\0'
-        if (size > 0) buf[0] = '\0';
-        return;
-    }
-
-    const char hex_chars[] = "0123456789ABCDEF";
-
-    buf[0] = hex_chars[(n >> 4) & 0xF]; // старший 4 бита
-    buf[1] = hex_chars[n & 0xF];        // младший 4 бита
-    buf[2] = '\0';
-}
-
-// n - число, buf - массив символов, size - размер массива
-void int_to_str(int n, char* buf, int size) {
-    int i = 0;
-    int is_negative = 0;
-
-    if (n == 0) {
-        if (size > 1) {
-            buf[0] = '0';
-            buf[1] = '\0';
-        }
-        return;
-    }
-
-    if (n < 0) {
-        is_negative = 1;
-        n = -n;
-    }
-
-    // временный буфер для цифр в обратном порядке
-    char tmp[12]; // достаточно для 32-битного числа
-    int j = 0;
-
-    while (n > 0 && j < sizeof(tmp)-1) {
-        tmp[j++] = '0' + (n % 10);
-        n /= 10;
-    }
-
-    if (is_negative) {
-        tmp[j++] = '-';
-    }
-
-    // копируем цифры в buf в правильном порядке
-    int k = 0;
-    while (j > 0 && k < size-1) {
-        buf[k++] = tmp[--j];
-    }
-    buf[k] = '\0';
-}
-
-// Преобразует строку вида "1234" в число 1234
-int str_to_int(const char* str) {
-    int result = 0;
-    int i = 0;
-    int sign = 1;
-
-    // Проверка на знак
-    if (str[0] == '-') {
-        sign = -1;
-        i++;
-    }
-
-    while (str[i] != '\0') {
-        char c = str[i];
-
-        if (c >= '0' && c <= '9') {
-            result = result * 10 + (c - '0');
-        } else {
-            // встречен недопустимый символ — прекращаем
-            break;
-        }
-        i++;
-    }
-
-    return result * sign;
-}
-
 static inline void delay(unsigned int ms) {
-    u32 count = 1193180 / 1000 * ms;  // количество тиков таймера для ms миллисекунд
-    outb(0x43, 0x36);                 // командный регистр PIT
-    outb(0x40, count & 0xFF);         // младший байт
-    outb(0x40, (count >> 8) & 0xFF);  // старший байт
+    if (ms == 0) return;
+    u32 total_ticks = (1193182 / 1000) * ms;
+    while (total_ticks > 0) {
+        u16 count = (total_ticks > 65535) ? 65535 : (u16)total_ticks;
+        total_ticks -= count;
+        outb(0x43, 0x30);                 
+        outb(0x40, count & 0xFF);
+        outb(0x40, (count >> 8) & 0xFF);
+        u16 current_value = count;
+        while (current_value > 0) {
+            outb(0x43, 0x00); 
 
-    // ждем, пока таймер не обнулится
-    for (volatile u32 i = 0; i < count; i++);
-}
+            u8 lsb = inb(0x40);
+            u8 msb = inb(0x40);
+            u16 new_value = lsb | (msb << 8);
 
-// str1, str2 - исходные строки
-// buffer - пустой массив с достаточным размером
-void strcat(char *buffer, const char *str1, const char *str2) {
-    int i = 0;
-    
-    // Копируем первую строку
-    while (*str1 != '\0') {
-        buffer[i++] = *str1++;
+            if (new_value > current_value) {
+                break; 
+            }
+            current_value = new_value;
+        }
     }
-    
-    // Копируем вторую строку
-    while (*str2 != '\0') {
-        buffer[i++] = *str2++;
-    }
-    
-    // Завершающий ноль
-    buffer[i] = '\0';
 }
 
 void __attribute__((interrupt)) exception_handler_c(struct interrupt_frame *frame) {
@@ -396,12 +260,16 @@ void execute(void) {
 }
 
 void read_sector(u64 lba) {
-    // Заглушка
+    disk_read_lba((u32)lba, sector_buffer);
+}
+
+void write_sector(u32 lba) {
+    disk_write_lba(lba, sector_buffer);
 }
 
 void execute_command(command comm) {
     if (strcmp(comm.cmd, "color") == 0) {
-        VGA_COLOR = (string_to_hex(comm.args[0]) << 4) | string_to_hex(comm.args[1]);
+        VGA_COLOR = (str_to_hex(comm.args[0]) << 4) | str_to_hex(comm.args[1]);
     }
     if (strcmp(comm.cmd, "cls") == 0) {
         clear_screen();
@@ -420,7 +288,8 @@ void execute_command(command comm) {
     }
     if (strcmp(comm.cmd, "dumb") == 0) {
         put_char('\n');
-        read_sector((u64)read_select);  // читаем сектор в buffer
+        move_screen();
+        readFilePart(read_select, str_to_int(comm.args), sector_buffer);
 
         for (int i = 0; i < 512; i += 16) {  // выводим по 16 байт на строку
             char line[80];
@@ -468,10 +337,7 @@ void execute_command(command comm) {
         write_string(buf);
         
         write_string("\nselect: ");
-        int_to_str(read_select, buf, sizeof(buf));
-        write_string(buf);
-        
-        write_string("\n");
+        write_string(getFile(read_select).path);
     }
     if (strcmp(comm.cmd, "strwrite") == 0) {
         for (int i = 0; i < 512; i++)
@@ -485,7 +351,7 @@ void execute_command(command comm) {
             i++;
         }
 
-        //write_sector(read_select);
+        setFile(read_select, str_to_int(comm.args), sector_buffer);
 
         for (int i = 0; i < 512; i++)
             sector_buffer[i] = 0;
@@ -496,9 +362,9 @@ void execute_command(command comm) {
             sector_buffer[i] = 0;
 
         for (int i = 0; i < length(comm.args); i++) 
-            sector_buffer[i] = comm.args[i];
+            sector_buffer[i] = comm.args[i + 1];
 
-        //write_sector(read_select);
+        setFile(read_select, str_to_int(comm.args), sector_buffer);
 
         for (int i = 0; i < 512; i++)
             sector_buffer[i] = 0;
@@ -507,14 +373,14 @@ void execute_command(command comm) {
     if (strcmp(comm.cmd, "read") == 0) {
         for (int i = 0; i < 512; i++)
             sector_buffer[i] = 0;
-        read_sector(read_select);
+        readFilePart(read_select, str_to_int(comm.args), sector_buffer);
         put_char('\n');
         for(int i = 0; i < 512; i++) 
             if(sector_buffer[i]) put_char(sector_buffer[i]);
         
     }
     if (strcmp(comm.cmd, "select") == 0) {
-        read_select = str_to_int(comm.args);
+        read_select = findFile(comm.args);
     }
     if (strcmp(comm.cmd, "tab") == 0) {
         tab_len = str_to_int(comm.args);
@@ -540,6 +406,13 @@ void execute_command(command comm) {
     if (strcmp(comm.cmd, "reboot") == 0) {
         outb(0x64, 0xFE);
     }
+    if (strcmp(comm.cmd, "touch") == 0) {
+        createFile(comm.args);
+    }
+    if (strcmp(comm.cmd, "dir") == 0) {
+        if(comm.args[0]) listFiles(write_string, comm.args);
+        else listFiles_(write_string);
+    }
     count = 0;
     for(int i = 0; i < 15; i++) num[i] = 0;
 }
@@ -547,10 +420,17 @@ void execute_command(command comm) {
 void kmain(void) {
     VGA_COLOR = 0x0F;
     clear_screen();
-
-    ehci_init();
-
-    put_char(space);
+    disk_init();
+    init_fs();
+    if(!inited) {
+        write_string("MAT not formatted, format? (y/n)");
+        char choi = choice("ny");
+        if(choi == 'y' || choi == 'Y') {
+            char name[10];
+            for(int i = 0; i < 10; i++) name[i] = read_key(0);
+            format(name);
+        }
+    }
 
     write_string("greenOS bootloader\npress any key to boot");
     wait_keypress();
@@ -558,6 +438,7 @@ void kmain(void) {
     VGA_COLOR = 0x02;
 
     write_string("greenOS\n>");
+    automs = 1;
     for (;;) {
         char c = read_key(1);
         if (c == '\b') {
