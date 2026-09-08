@@ -3,16 +3,18 @@
 #include "in-out.h"
 #include "string.h"
 
-#define MAX_FILES     128   // 512/4 записей в list-секторе
-#define MAX_CONTENT   8     // секторов данных на файл (пока без цепочек)
-#define DATA_START    64    // где начинается область данных (после bitmap)
-#define BITMAP_SECTOR 51    // отдельно от diskptr, для простоты фиксирован
+#define MAX_CONTENT      8     // секторов данных на файл (пока без цепочек)
+#define BITMAP_SECTOR    51    // где НАЧИНАЕТСЯ bitmap (фиксировано)
+#define SLOTS_PER_SECTOR 127   // marks в одном list-секторе (508 байт) + 4 байта на "next"
 
 u32 disk_s = 49;
-u32 list_s = 50;
+u32 list_s = 50;    // корень единственного списка файлов (всегда фиксирован)
 u8 inited = 0;
 char disk_name[16];
 u32 diskptr;
+u32 bitmap_sectors = 1;
+u32 data_start = 64;
+u32 data_sectors_total = 512 * 8;
 
 /* ---------- init / format ---------- */
 
@@ -29,6 +31,15 @@ void init_fs() {
 	u32 p1 = buf[19 + 2] << 16;
 	u32 p0 = (u32)buf[19 + 3] << 24;
 	diskptr = p3 + p2 + p1 + p0;
+
+	u32 total = disk_get_total_sectors();
+	if (total > diskptr) {
+		u32 span = total - diskptr;
+		bitmap_sectors = (span + 4096 - 1) / 4096;
+		if (bitmap_sectors == 0) bitmap_sectors = 1;
+		data_start = diskptr + bitmap_sectors;
+		data_sectors_total = (total > data_start) ? (total - data_start) : 0;
+	}
 }
 
 void format(char *name) {
@@ -43,12 +54,23 @@ void format(char *name) {
 	buf[19 + 3] = (u8)((diskptr >> 24) & 0xFF);
 	disk_write_lba(disk_s, buf);
 
-	// очищаем list (все mark-указатели = 0, т.е. "слот свободен")
+	// очищаем корень списка файлов (единственный фиксированный сектор)
 	u8 zero[512] = {0};
 	disk_write_lba(list_s, zero);
 
-	// очищаем bitmap (все секторы свободны)
-	disk_write_lba(diskptr, zero);
+	u32 total = disk_get_total_sectors();
+	if (total > diskptr) {
+		u32 span = total - diskptr;
+		bitmap_sectors = (span + 4096 - 1) / 4096;
+		if (bitmap_sectors == 0) bitmap_sectors = 1;
+	} else {
+		bitmap_sectors = 1;
+	}
+	data_start = diskptr + bitmap_sectors;
+	data_sectors_total = (total > data_start) ? (total - data_start) : 0;
+
+	for (u32 i = 0; i < bitmap_sectors; i++)
+		disk_write_lba(diskptr + i, zero);
 
 	inited = 1;
 	memcpy(disk_name, name, 16);
@@ -64,61 +86,121 @@ static void bit_set(u8 *bm, u32 idx, u8 val) {
 	else     bm[idx / 8] &= ~(1 << (idx % 8));
 }
 
-// найти свободный сектор данных, пометить занятым, вернуть его LBA (0 = нет места)
 u32 alloc_sector() {
 	if (!inited) return 0;
-	u8 bm[512];
-	disk_read_lba(diskptr, bm);
 
-	for (u32 i = 0; i < 512 * 8; i++) {
-		if (!bit_get(bm, i)) {
-			bit_set(bm, i, 1);
-			disk_write_lba(diskptr, bm);
-			return DATA_START + i;
+	for (u32 sec = 0; sec < bitmap_sectors; sec++) {
+		u8 bm[512];
+		disk_read_lba(diskptr + sec, bm);
+
+		u32 base = sec * 4096;
+		for (u32 local = 0; local < 4096; local++) {
+			u32 gidx = base + local;
+			if (gidx >= data_sectors_total) break;
+
+			if (!bit_get(bm, local)) {
+				bit_set(bm, local, 1);
+				disk_write_lba(diskptr + sec, bm);
+				return data_start + gidx;
+			}
 		}
 	}
-	return 0; // диск полон
+	return 0;
 }
 
 void free_sector(u32 lba) {
-	if (!inited || lba < DATA_START) return;
+	if (!inited || lba < data_start) return;
+	u32 gidx = lba - data_start;
+	if (gidx >= data_sectors_total) return;
+
+	u32 sec = gidx / 4096;
+	u32 local = gidx % 4096;
+
 	u8 bm[512];
-	disk_read_lba(diskptr, bm);
-	bit_set(bm, lba - DATA_START, 0);
-	disk_write_lba(diskptr, bm);
+	disk_read_lba(diskptr + sec, bm);
+	bit_set(bm, local, 0);
+	disk_write_lba(diskptr + sec, bm);
 }
 
-/* ---------- работа со списком файлов ---------- */
+/* ---------- список файлов: растёт цепочкой секторов по мере надобности ---------- */
 
-u32 getMarkS(u16 num) {
-	if (!inited || num >= MAX_FILES) return 0;
+// найти LBA сектора, где физически лежит слот с глобальным индексом num
+// (переходя по цепочке "next"); если grow=1 и цепочка коротка - достраивает её
+static u32 list_walk(u32 num, u8 grow) {
+	u32 sector_idx = num / SLOTS_PER_SECTOR;
+	u32 cur = list_s;
+
+	for (u32 hop = 0; hop < sector_idx; hop++) {
+		u8 buf[512];
+		disk_read_lba(cur, buf);
+		u32 next = buf[508] | (buf[509] << 8) | (buf[510] << 16) | ((u32)buf[511] << 24);
+
+		if (next == 0) {
+			if (!grow) return 0;
+			next = alloc_sector();
+			if (next == 0) return 0;   // диск полон
+
+			u8 zero[512] = {0};
+			disk_write_lba(next, zero);
+
+			buf[508] = (u8)(next & 0xFF);
+			buf[509] = (u8)((next >> 8) & 0xFF);
+			buf[510] = (u8)((next >> 16) & 0xFF);
+			buf[511] = (u8)((next >> 24) & 0xFF);
+			disk_write_lba(cur, buf);
+		}
+		cur = next;
+	}
+	return cur;
+}
+
+u32 getMarkS(u32 num) {
+	if (!inited) return 0;
+	u32 sec = list_walk(num, 0);
+	if (sec == 0) return 0;
+
 	u8 buf[512];
-	disk_read_lba(list_s, buf);
-	u16 dest = num * 4;
-	u32 p3 = buf[dest];
-	u32 p2 = buf[dest + 1] << 8;
-	u32 p1 = buf[dest + 2] << 16;
-	u32 p0 = (u32)buf[dest + 3] << 24;
-	return p3 + p2 + p1 + p0;
+	disk_read_lba(sec, buf);
+	u32 off = (num % SLOTS_PER_SECTOR) * 4;
+	return buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | ((u32)buf[off+3] << 24);
 }
 
-void setMarkS(u16 num, u32 mark) {
-	if (!inited || num >= MAX_FILES) return;
+void setMarkS(u32 num, u32 mark) {
+	if (!inited) return;
+	u32 sec = list_walk(num, 1);
+	if (sec == 0) return;
+
 	u8 buf[512];
-	disk_read_lba(list_s, buf);
-	u16 dest = num * 4;
-	buf[dest]     = (u8)(mark & 0xFF);
-	buf[dest + 1] = (u8)((mark >> 8) & 0xFF);
-	buf[dest + 2] = (u8)((mark >> 16) & 0xFF);
-	buf[dest + 3] = (u8)((mark >> 24) & 0xFF);
-	disk_write_lba(list_s, buf);
+	disk_read_lba(sec, buf);
+	u32 off = (num % SLOTS_PER_SECTOR) * 4;
+	buf[off]   = (u8)(mark & 0xFF);
+	buf[off+1] = (u8)((mark >> 8) & 0xFF);
+	buf[off+2] = (u8)((mark >> 16) & 0xFF);
+	buf[off+3] = (u8)((mark >> 24) & 0xFF);
+	disk_write_lba(sec, buf);
 }
 
-// первый свободный слот в list (mark == 0 значит пусто), -1 если нет места
-static s32 find_free_slot() {
-	for (u16 i = 0; i < MAX_FILES; i++)
-		if (getMarkS(i) == 0) return i;
-	return -1;
+// первый свободный слот (mark==0) в пределах уже существующей цепочки,
+// либо следующий по порядку индекс сразу за концом цепочки (тогда setMarkS её достроит)
+static u32 find_free_slot() {
+	u32 cur = list_s;
+	u32 base = 0;
+	for (;;) {
+		u8 buf[512];
+		disk_read_lba(cur, buf);
+
+		for (u32 i = 0; i < SLOTS_PER_SECTOR; i++) {
+			u32 off = i * 4;
+			u32 mark = buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | ((u32)buf[off+3] << 24);
+			if (mark == 0) return base + i;
+		}
+
+		u32 next = buf[508] | (buf[509] << 8) | (buf[510] << 16) | ((u32)buf[511] << 24);
+		if (next == 0) return base + SLOTS_PER_SECTOR;   // конец цепочки - расти сюда
+
+		cur = next;
+		base += SLOTS_PER_SECTOR;
+	}
 }
 
 /* ---------- файлы ---------- */
@@ -147,7 +229,7 @@ void setFile(u32 mark, u8 part, u8 *content) {
 	file f = getFile(mark);
 	if (f.content[part] == 0) {
 		f.content[part] = alloc_sector();
-		if (f.content[part] == 0) return; // диск полон
+		if (f.content[part] == 0) return;
 		writeFile(&f);
 	}
 	disk_write_lba(f.content[part], content);
@@ -156,16 +238,16 @@ void setFile(u32 mark, u8 part, u8 *content) {
 u8 readFilePart(u32 mark, u8 part, u8 *out_buf) {
 	if (!inited || part >= MAX_CONTENT) return 0;
 	file f = getFile(mark);
-	if (f.content[part] == 0) return 0; // не аллоцирован
+	if (f.content[part] == 0) return 0;
 	disk_read_lba(f.content[part], out_buf);
 	return 1;
 }
 
-// создать новый файл, вернуть mark-сектор (0 = не удалось: нет места в list или на диске)
 u32 createFile(const char *path) {
 	if (!inited) return 0;
-	s32 slot = find_free_slot();
-	if (slot < 0) return 0;
+	if (findFile(path)) return 0;
+
+	u32 slot = find_free_slot();
 
 	u32 mark = alloc_sector();
 	if (mark == 0) return 0;
@@ -175,62 +257,88 @@ u32 createFile(const char *path) {
 	f.mark_s = mark;
 	writeFile(&f);
 
-	setMarkS((u16)slot, mark);
+	setMarkS(slot, mark);
 	return mark;
 }
 
 void deleteFile(u32 mark) {
 	if (!inited || mark == 0) return;
 
-	// освободить все занятые секторы данных
 	file f = getFile(mark);
 	for (u8 i = 0; i < MAX_CONTENT; i++)
 		if (f.content[i]) free_sector(f.content[i]);
 
-	// убрать сам mark-сектор
 	free_sector(mark);
 
-	// убрать из list
-	for (u16 i = 0; i < MAX_FILES; i++) {
-		if (getMarkS(i) == mark) {
-			setMarkS(i, 0);
-			break;
+	u32 cur = list_s;
+	while (cur) {
+		u8 buf[512];
+		disk_read_lba(cur, buf);
+		u8 changed = 0;
+
+		for (u32 i = 0; i < SLOTS_PER_SECTOR; i++) {
+			u32 off = i * 4;
+			u32 m = buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | ((u32)buf[off+3] << 24);
+			if (m == mark) {
+				buf[off] = buf[off+1] = buf[off+2] = buf[off+3] = 0;
+				changed = 1;
+				break;
+			}
 		}
+		if (changed) { disk_write_lba(cur, buf); return; }
+
+		cur = buf[508] | (buf[509] << 8) | (buf[510] << 16) | ((u32)buf[511] << 24);
 	}
 }
 
-// найти файл по пути, вернуть mark (0 = не найден)
 u32 findFile(const char *path) {
 	if (!inited) return 0;
-	for (u16 i = 0; i < MAX_FILES; i++) {
-		u32 mark = getMarkS(i);
-		if (mark == 0) continue;
-		file f = getFile(mark);
-		if (strcmp(f.path, path) == 0) return mark;
+
+	u32 cur = list_s;
+	while (cur) {
+		u8 buf[512];
+		disk_read_lba(cur, buf);
+
+		for (u32 i = 0; i < SLOTS_PER_SECTOR; i++) {
+			u32 off = i * 4;
+			u32 mark = buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | ((u32)buf[off+3] << 24);
+			if (mark == 0) continue;
+			file f = getFile(mark);
+			if (strcmp(f.path, path) == 0) return mark;
+		}
+
+		cur = buf[508] | (buf[509] << 8) | (buf[510] << 16) | ((u32)buf[511] << 24);
 	}
 	return 0;
 }
 
-// напечатать список файлов (для команды ls/list в шелле)
 void listFiles_(void (*print)(const char*)) {
 	listFiles(print, "/");
 }
 
-// напечатать список файлов (для команды ls/list в шелле) но с фильтром по префиксу
 void listFiles(void (*print)(const char*), char *filter) {
 	if (!inited) return;
 	u32 flen = strlen(filter);
 
-	for (u16 i = 0; i < MAX_FILES; i++) {
-		u32 mark = getMarkS(i);
-		if (mark == 0) continue;
-		file f = getFile(mark);
+	u32 cur = list_s;
+	while (cur) {
+		u8 buf[512];
+		disk_read_lba(cur, buf);
 
-		u32 j = 0;
-		while (j < flen && f.path[j] == filter[j]) j++;
-		if (j != flen) continue; // filter - не префикс f.path
+		for (u32 i = 0; i < SLOTS_PER_SECTOR; i++) {
+			u32 off = i * 4;
+			u32 mark = buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | ((u32)buf[off+3] << 24);
+			if (mark == 0) continue;
 
-		print(f.path);
-		print("\n");
+			file f = getFile(mark);
+			u32 j = 0;
+			while (j < flen && f.path[j] == filter[j]) j++;
+			if (j != flen) continue;
+
+			print(f.path);
+			print("\n");
+		}
+
+		cur = buf[508] | (buf[509] << 8) | (buf[510] << 16) | ((u32)buf[511] << 24);
 	}
 }

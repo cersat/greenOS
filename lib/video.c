@@ -1,5 +1,6 @@
 #include "in-out.h"
 #include "video.h"
+#include "string.h"
 
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -39,7 +40,7 @@ void clear_screen(void) {
 }
 
 static inline void ser_putc(char c){
-    while(!(inb(0x3F9-1+5) & 0x20)) {}
+    while(!(inb(0x3F9-1+5) & 0x20));
     outb(0x3F8, (u8)c);
 }
 static u8 ser_ready = 0;
@@ -50,9 +51,19 @@ void set_char(u8 x, u8 y, char c) {
     VGA[pos * 2 + 1] = VGA_COLOR;
 }
 
+void set_color(u8 x, u8 y, char c) {
+    u16 pos = y * VGA_WIDTH + x;
+    VGA[pos * 2 + 1] = (u8)c;
+}
+
 char get_char(u8 x, u8 y) {
     u16 pos = y * VGA_WIDTH + x;
     return (char)VGA[pos * 2];
+}
+
+char get_color(u8 x, u8 y) {
+    u16 pos = y * VGA_WIDTH + x;
+    return (char)VGA[(pos * 2) + 1];
 }
 
 void move_screen() {
@@ -60,7 +71,9 @@ void move_screen() {
     for (u8 j = 1; j < VGA_HEIGHT; j++) {
         for (u8 i = 0; i < VGA_WIDTH; i++) {
             // Копируем символ из текущей строки j в строку выше (j - 1)
+            int color = get_color(i, j);
             set_char(i, j - 1, get_char(i, j));
+            set_color(i, j - 1, color);
         }
     }
 
@@ -70,6 +83,13 @@ void move_screen() {
     }
 }
 
+void put_char_color(char c, int color) {
+    int col = VGA_COLOR;
+    VGA_COLOR = color;
+    put_char(c);
+    VGA_COLOR = col;
+}
+
 void put_char(char c) {
     if(!ser_ready){
         outb(0x3F8+1,0x00); outb(0x3F8+3,0x80); outb(0x3F8+0,0x03);
@@ -77,21 +97,23 @@ void put_char(char c) {
         ser_ready = 1;
     }
     ser_putc(c);
+
     if (c == '\n') {
-        if (automs && cursor >= VGA_WIDTH * VGA_HEIGHT) {
-            move_screen();
-            cursor -= VGA_WIDTH; // остаёмся на последней строке, а не улетаем за экран
-        } else { // move_screen() УЖЕ двигает строку
-            cursor += (VGA_WIDTH - (cursor % VGA_WIDTH));
-        }
+        cursor += (VGA_WIDTH - (cursor % VGA_WIDTH));
     } else {
         VGA[cursor * 2] = (u8)c;
         VGA[cursor * 2 + 1] = VGA_COLOR;
         ++cursor;
     }
 
+    // единая точка проверки переполнения - после ЛЮБОГО символа, не только '\n'
     if (cursor >= VGA_WIDTH * VGA_HEIGHT) {
-        cursor = 0; // если automs выключен - старое поведение, обрезаем в 0
+        if (automs) {
+            move_screen();
+            cursor -= VGA_WIDTH;
+        } else {
+            cursor = 0;
+        }
     }
 
     move_cursor();
@@ -110,8 +132,8 @@ void print_dec(u32 value)
     buffer[i - 1] = 0;
 
     for(int j = i - 2; j >= 0; j--) {
-        buffer[j] = hex_chars[value & 0x09];
-        value >>= 4;
+        buffer[j] = hex_chars[value % 10];
+        value /= 10;
     }
 
     write_string(buffer);
@@ -150,4 +172,55 @@ void write_string(const char* s) {
     while (*s) {
         put_char(*s++);
     }
+}
+
+void wsf(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    while (*fmt) {
+        switch (*fmt) {
+            case 's': {
+                char *s = va_arg(args, char*);
+                write_string(s);
+                break;
+            }
+            case 'd': {
+                int v = va_arg(args, int);
+                char buf[12];
+                write_string(int_to_str(v, buf, sizeof(buf)));
+                break;
+            }
+            case 'x': {
+                u32 v = va_arg(args, u32);
+                char buf[9];
+                write_string(hex_to_str(v, buf, sizeof(buf)));
+                break;
+            }
+            case 'b': {
+                u32 v = va_arg(args, u32);
+                print_bin(v);
+                break;
+            }
+            case 'c': {
+                char c = (char)va_arg(args, int);
+                put_char(c);
+                break;
+            }
+            case ' ': {
+                put_char(' ');
+                break;
+            }
+            case '\n': {
+                put_char('\n');
+                break;
+            }
+            default: {
+                break;
+            }
+        }
+        fmt++;
+    }
+
+    va_end(args);
 }

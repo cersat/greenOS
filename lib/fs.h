@@ -10,6 +10,9 @@ typedef struct {
 } file;
 
 extern u8 inited;
+extern u32 bitmap_sectors;       // сколько 512-байтных секторов реально занимает bitmap
+extern u32 data_start;           // где реально начинаются данные (diskptr + bitmap_sectors)
+extern u32 data_sectors_total;   // сколько секторов данных реально адресует bitmap (зависит от размера диска)
 
 void init_fs(void);
 void format(char *name);
@@ -17,8 +20,8 @@ void format(char *name);
 u32  alloc_sector(void);
 void free_sector(u32 lba);
 
-u32  getMarkS(u16 num);
-void setMarkS(u16 num, u32 mark);
+u32  getMarkS(u32 num);
+void setMarkS(u32 num, u32 mark);
 
 file getFile(u32 mark);
 void writeFile(file *f);

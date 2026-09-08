@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-echo "running in mingw32"
+echo "running in mingw64"
 
 set -euo pipefail
 
@@ -23,8 +23,9 @@ CFLAGS=(
   -ffreestanding -m32
   -fno-stack-protector -fno-pic
   -Wbuiltin-declaration-mismatch
-  -mgeneral-regs-only -mno-80387
-  -mno-mmx -mno-sse -mno-sse2
+  -mgeneral-regs-only -mno-mmx 
+  -mno-sse -mno-sse2 -Wall -Wextra
+  -Wunused-but-set-variable
 )
 
 i686-elf-gcc "${CFLAGS[@]}" -c kernel.c -o kernel.o

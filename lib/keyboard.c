@@ -1,5 +1,6 @@
 #include "in-out.h"
 #include "keyboard.h"
+#include "video.h"
 
 static u8 shift = 0;
 static u8 arrows = 0;
@@ -40,15 +41,12 @@ static unsigned char scancode_to_ascii(u8 scancode) {
     return table[scancode];
 }
 void wait_keypress(void) {
-    for(;;) {
-        if((inb(0x64) & 1) == 0) continue;
-        break;
-    }
+    read_key(1);
 }
 
 char choice(char *choices) {
     u8 length = 0;
-    for(length; choices[length]; length++);
+    for(; choices[length]; length++);
     for(;;) {
         char c = read_key(0);
         for(int i = 0; i < length; i++) if(choices[i] == c) return choices[i];
@@ -130,4 +128,28 @@ unsigned char read_key(u8 functions) {
             return c;
         }
     }
+}
+
+char* get_string(char* buf, char term, u16 size, u8 flags) {
+    u8 f_print = flags & 0b1;
+    u8 f_funct = flags & 0b10;
+    u8 f_skip  = flags & 0b100;
+    u16 i = 0;
+    while(i < size) {
+        char input = read_key(f_funct);
+        if (input == '\b') {
+            if (i > 0) {
+                i--;
+                buf[i] = 0;
+                if(f_print) del_symbol();
+            }
+            continue;
+        }
+        if(input == term && !f_skip) break;
+        if(f_print) put_char(input);
+        buf[i] = input;
+        i++;
+    }
+    buf[i] = 0;
+    return buf;
 }

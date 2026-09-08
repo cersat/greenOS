@@ -1,26 +1,22 @@
 #include "string.h"
 
-void strcat(char *buffer, const char *str1, const char *str2) {
+char *strcat(char *buffer, const char *str) {
     int i = 0;
     
     // Копируем первую строку
-    while (*str1 != '\0') {
-        buffer[i++] = *str1++;
-    }
-    
-    // Копируем вторую строку
-    while (*str2 != '\0') {
-        buffer[i++] = *str2++;
+    while (*str != '\0') {
+        buffer[i++] = *str++;
     }
     
     // Завершающий ноль
     buffer[i] = '\0';
+    return buffer;
 }
 
-void hex_to_str(u8 n, char* buf, int size) {
+char *hex_to_str(u8 n, char* buf, int size) {
     if (size < 3) { // нужно как минимум 2 символа + '\0'
         if (size > 0) buf[0] = '\0';
-        return;
+        return buf;
     }
 
     const char hex_chars[] = "0123456789ABCDEF";
@@ -28,10 +24,10 @@ void hex_to_str(u8 n, char* buf, int size) {
     buf[0] = hex_chars[(n >> 4) & 0xF]; // старший 4 бита
     buf[1] = hex_chars[n & 0xF];        // младший 4 бита
     buf[2] = '\0';
+    return buf;
 }
 
-void int_to_str(int n, char* buf, int size) {
-    int i = 0;
+char *int_to_str(int n, char* buf, int size) {
     int is_negative = 0;
 
     if (n == 0) {
@@ -39,7 +35,7 @@ void int_to_str(int n, char* buf, int size) {
             buf[0] = '0';
             buf[1] = '\0';
         }
-        return;
+        return buf;
     }
 
     if (n < 0) {
@@ -51,7 +47,7 @@ void int_to_str(int n, char* buf, int size) {
     char tmp[12]; // достаточно для 32-битного числа
     int j = 0;
 
-    while (n > 0 && j < sizeof(tmp)-1) {
+    while (n > 0 && j < (int)sizeof(tmp)-1) {
         tmp[j++] = '0' + (n % 10);
         n /= 10;
     }
@@ -66,6 +62,7 @@ void int_to_str(int n, char* buf, int size) {
         buf[k++] = tmp[--j];
     }
     buf[k] = '\0';
+    return buf;
 }
 
 int str_to_int(const char* str) {
@@ -117,7 +114,6 @@ void *memset(void *dest, int val, unsigned int n) {
 }
 
 void *memcpy(void *dest, const void *src, unsigned int n) {
-
     unsigned char *d = dest;
     const unsigned char *s = src;
 
@@ -137,9 +133,9 @@ int strcmp(const char* s1, const char* s2) {
 }
 
 // удаляет из str первое вхождение needle, сдвигая остаток строки влево
-void cut(char *str, const char *needle) {
+char *cut(char *str, const char *needle) {
 	u32 nlen = strlen(needle);
-	if (nlen == 0) return;
+	if (nlen == 0) return str;
 
 	u32 pos = 0;
 	u8 found = 0;
@@ -154,7 +150,7 @@ void cut(char *str, const char *needle) {
 		}
 	}
 
-	if (!found) return;
+	if (!found) return str;
 
 	char *src = &str[pos + nlen];
 	char *dst = &str[pos];
@@ -162,6 +158,7 @@ void cut(char *str, const char *needle) {
 		*dst++ = *src++;
 	}
 	*dst = 0;
+    return str;
 }
 
 u32 strlen(const char *s) {
@@ -170,7 +167,7 @@ u32 strlen(const char *s) {
 	return len;
 }
 
-void stradd(char *buffer, const char *str, const char *str2) {
+char *stradd(char *buffer, const char *str, const char *str2) {
 	u32 i = 0;
 	while (str[i]) {
 		buffer[i] = str[i];
@@ -182,4 +179,5 @@ void stradd(char *buffer, const char *str, const char *str2) {
 		j++;
 	}
 	buffer[i + j] = 0;
+    return buffer;
 }
