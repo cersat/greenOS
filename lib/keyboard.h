@@ -1,5 +1,6 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
+#define NO_TERM 0
 
 // Ждать нажатия клавиши
 void wait_keypress(void);

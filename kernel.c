@@ -516,7 +516,7 @@ void kmain(void) {
         if(choi == 'y' || choi == 'Y') {
             char name[17];
             write_string("drive label:");
-            format(get_string(name, 0, 16, 0b101));
+            format(get_string(name, NO_TERM, 16, 0b101));
             clear_screen();
         }
     }
