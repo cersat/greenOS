@@ -1,5 +1,5 @@
 ; tramp.asm — real-mode трамплин для BIOS INT 13h (greenOS)
-; Метод как в AetherOS: BIOS (SeaBIOS) внутри int 13h делает свой lgdt и не
+; BIOS (SeaBIOS) внутри int 13h делает свой lgdt и не
 ; восстанавливает наш — поэтому перед возвратом в protected mode мы
 ; перезагружаем СВОЮ копию GDT, которая едет прямо здесь (org 0x2000 известен).
 [bits 16]
