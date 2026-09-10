@@ -4,6 +4,7 @@
 #include "lib/disk.h"
 #include "lib/string.h"
 #include "lib/fs.h"
+#include "lib/command.h"
 
 // В начало файла, после #include
 // В начало файла, после #include
@@ -42,11 +43,6 @@ typedef struct {
   u32 int_no, err_code;
   u32 ip, cs, flags;
 } interrupt_frame;
-
-typedef struct {
-    int (*func_ptr)(char*);
-    char* name;
-} run_cmd;
 
 void execute_command(command comm);
 
@@ -91,7 +87,7 @@ void rtc_wait() {
     }
 }
 
-u8 utc = 4; // UTC+4 Tbilisi
+u8 utc = 0; // UTC+4 Tbilisi
 
 u8 rtc_read(u8 reg) {
     outb(0x70, 0x0B);
@@ -104,6 +100,25 @@ u8 rtc_read(u8 reg) {
         return val;               // уже бинарный формат — возвращаем как есть
     } else {
         return (val & 0x0F) + ((val >> 4) * 10);  // BCD -> обычное число
+    }
+}
+
+void get_utc() {
+    u32 sector = findFile("/settings.bin");
+    if(sector) {
+        readFilePart(sector, 0, sector_buffer);
+        utc = sector_buffer[0];
+    }
+}
+
+void set_utc() {
+    u32 sector = findFile("/settings.bin");
+    if(sector) {
+        sector_buffer[0] = utc;
+        setFile(sector, 0, sector_buffer);
+    } else {
+        createFile("/settings.bin");
+        set_utc();
     }
 }
 
@@ -163,18 +178,15 @@ void run_script(u32 sector) {
     wsf("ss", "\nExecuting finished in string ", int_to_str(strings, buf, sizeof(buf)));
 }
 
+static char empty_args_buf[1] = {0};
+
 void split_command(char* input, char** cmd, char** args) {
     *cmd = input;
-    *args = 0;
-    for(int j = 0; input[j]; j++) {
-        if(input[j] != ' ') continue;
-    }
-
-
+    *args = empty_args_buf;
     for (int i = 0; input[i]; i++) {
         if (input[i] == ' ') {
             input[i] = '\0';     // разрезаем строку
-            *args = &input[i+1]; // аргументы после пробела
+            *args = &input[i+1]; // аргументы после пробела (если после пробела пусто - тоже валидная пустая строка)
             return;
         }
     }
@@ -333,176 +345,27 @@ void write_sector(u32 lba) {
     disk_write_lba(lba, sector_buffer);
 }
 
+#include "commands.inc"
+// f*ck preprocesor
+
 void execute_command(command comm) {
-    if (strcmp(comm.cmd, "color") == 0 && comm.args) {
-        VGA_COLOR = (str_to_hex(comm.args[0]) << 4) | str_to_hex(comm.args[1]);
+    int i = 0;
+    u8 found = 0;
+    for(; (u64)i < sizeof(commands) / sizeof(run_cmd); i++) if(strcmp(commands[i].name, comm.cmd) == 0) {
+        cmd_args a = get_args(comm.args);
+        cmd_ret r = commands[i].func_ptr(a);
+        if(r.errorcode) wsf("\ncdcs", '[', r.errorcode, ']', r.error);
+        found = 1;
+        break;
     }
-    else if (strcmp(comm.cmd, "cls") == 0) {
-        clear_screen();
-    }
-    else if (strcmp(comm.cmd, "echo") == 0 && comm.args) {
-        put_char('\n');
-        write_string(comm.args);
-    }
-    else if (strcmp(comm.cmd, "delay") == 0 && comm.args) {
-        int del = str_to_int(comm.args);
-        if(del <= 0 || del >= 100000) write_string("\ninvalid delay");
-        else delay(del);
-    }
-    else if (strcmp(comm.cmd, "run") == 0) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        run_script((u32)read_select);
-    }
-    else if (strcmp(comm.cmd, "dumb") == 0) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        put_char('\n');
-        move_screen();
-        readFilePart(read_select, str_to_int(comm.args), sector_buffer);
 
-        for (int i = 0; i < 512; i += 16) {  // выводим по 16 байт на строку
-            char line[80];
-            wsf("dc ", i, ':');
-
-            // HEX часть
-            for (int j = 0; j < 16; j++) {
-                u8 b = sector_buffer[i + j];
-                char hex[3] = {0};
-                hex[0] = (b >> 4) < 10 ? '0' + (b >> 4) : 'A' + ((b >> 4) - 10);
-                hex[1] = (b & 0x0F) < 10 ? '0' + (b & 0x0F) : 'A' + ((b & 0x0F) - 10);
-                hex[2] = '\0';
-                wsf("s ", hex);
-            }
-
-            // ASCII часть
-            write_string(" |");
-            for (int j = 0; j < 16; j++) {
-                u8 c = sector_buffer[i + j];
-                if (c > 10) {  // печатаемые символы
-                    put_char(c);
-                } else {
-                    put_char_color('.', 0x70);  // непечатаемые
-                }
-            }
-            char u = read_key(0);
-            if (u == 27) break;
-            write_string("|\n");
-        }
-
-    }
-    else if (strcmp(comm.cmd, "info") == 0) {
-        file f = getFile(read_select);
-        wsf("ssxsssd", "\nmode: 32bit", "\ncolor: ", VGA_COLOR, "\nselect: ", f.path, "\ndisk size: ", data_sectors_total);
-    }
-    else if (strcmp(comm.cmd, "strwrite") == 0 && comm.args) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        for (int i = 0; i < 512; i++)
-            sector_buffer[i] = 0;
-
-        put_char('\n');
-        get_string((char*)sector_buffer, 27, 512, 0b011);
-
-        setFile(read_select, str_to_int(comm.args), sector_buffer);
-
-        for (int i = 0; i < 512; i++)
-            sector_buffer[i] = 0;
-
-    }
-    else if (strcmp(comm.cmd, "write") == 0 && comm.args) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        for (int i = 0; i < 512; i++)
-            sector_buffer[i] = 0;
-
-        for (int i = 0; i < length(comm.args); i++) 
-            sector_buffer[i] = comm.args[i + 2];
-
-        setFile(read_select, str_to_int(comm.args), sector_buffer);
-
-        for (int i = 0; i < 512; i++)
-            sector_buffer[i] = 0;
-
-    }
-    else if (strcmp(comm.cmd, "read") == 0 && comm.args) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        for (int i = 0; i < 512; i++)
-            sector_buffer[i] = 0;
-        readFilePart(read_select, str_to_int(comm.args), sector_buffer);
-        put_char('\n');
-        for(int i = 0; i < 512; i++) 
-            if(sector_buffer[i]) put_char(sector_buffer[i]);
-        
-    }
-    else if (strcmp(comm.cmd, "select") == 0 && comm.args) {
-        read_select = findFile(comm.args);
-    }
-    else if (strcmp(comm.cmd, "tab") == 0 && comm.args) {
-        tab_len = str_to_int(comm.args);
-    }
-    else if (strcmp(comm.cmd, "charmap") == 0 && comm.args) {
-        for(int i = 10; i < 256; i++)  wsf("ccdc", i, '|', i, newline);
-
-    } 
-    // divnull was here
-    else if (strcmp(comm.cmd, "scan_pci") == 0) {
-        scan_pci();
-    }
-    else if (strcmp(comm.cmd, "panic") == 0) {
-        Cpanic("err_generated_manually");
-    }
-    else if (strcmp(comm.cmd, "reboot") == 0) {
-        outb(0x64, 0xFE);
-    }
-    else if (strcmp(comm.cmd, "touch") == 0 && comm.args) {
-        createFile(comm.args);
-    }
-    else if (strcmp(comm.cmd, "del") == 0) {
-        if (read_select == 0) { write_string("\nno file selected"); return; }
-        deleteFile(read_select);
-    }
-    else if (strcmp(comm.cmd, "dir") == 0) {
-        put_char(newline);
-        if(comm.args[0]) listFiles(write_string, comm.args);
-        else listFiles(write_string, "/");
-    }
-    else if (strcmp(comm.cmd, "in") == 0 && comm.args) {
-        char mode = comm.args[0];
-        u16 port = str_to_int(&comm.args[2]);
-        //u64 val = str_to_int(&comm.args[8]);
-        char buf[5];
-        if(mode == 'b') write_string(int_to_str(inb(port), buf, 5));
-        if(mode == 'w') write_string(int_to_str(inw(port), buf, 5));
-        if(mode == 'l') write_string(int_to_str(inl(port), buf, 5));
-    }
-    else if (strcmp(comm.cmd, "out") == 0 && comm.args) {
-        char mode = comm.args[0];
-        u16 port = str_to_int(&comm.args[2]);
-        u32 val = str_to_int(&comm.args[8]);
-        if(mode == 'b') outb(port, val);
-        if(mode == 'w') outw(port, val);
-        if(mode == 'l') outl(port, val);
-    }
-    else if (strcmp(comm.cmd, "time") == 0) {
-        rtc_wait();
-        u8 sec  = rtc_read(0x00);
-        u8 min  = rtc_read(0x02);
-        u8 hour = rtc_read(0x04);
-        wsf("cdcdcd", newline, (utc + hour) % 24, ':', min, ':', sec);
-    }
-    else if (strcmp(comm.cmd, "date") == 0) {
-        rtc_wait();
-        u8 day = rtc_read(0x07);
-        u8 mon = rtc_read(0x08);
-        u16 year = rtc_read(0x09);
-        wsf("cdcdcd", newline, day, '.', mon, space, 2000 + year);
-    }
-    else if (strcmp(comm.cmd, "utc") == 0 && comm.args) {
-        utc = str_to_int(comm.args);
-    }
-    else {
+    if (!found) {
         put_char(newline);
         write_string("incorrect command");
     }
+
     count = 0;
-    for(int i = 0; i < 15; i++) num[i] = 0;
+    for(int j = 0; j < 15; j++) num[j] = 0;
 }
 
 void kmain(void) {
@@ -520,6 +383,7 @@ void kmain(void) {
             clear_screen();
         }
     }
+    get_utc();
 
     write_string("greenOS bootloader\npress any key to boot");
     wait_keypress();

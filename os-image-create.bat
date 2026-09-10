@@ -1,5 +1,4 @@
 @ECHO OFF
-copy /b boot.bin + kernel.bin os-image.bin >nul
 cd \
 cd program files
 cd rufus
