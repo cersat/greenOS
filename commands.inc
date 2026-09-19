@@ -9,7 +9,7 @@ cmd_ret cmd_cls(cmd_args args) {
 cmd_ret cmd_color(cmd_args args) {
 	cmd_ret ret;
 	ret.errorcode = 0;
-	wsf("d", args.amount);
+	//wsf("d", args.amount);
 	if(args.amount < 1) {
         RET_ERRCODE(3, "Insufficient arguments");
 	}
@@ -217,6 +217,7 @@ cmd_ret cmd_reboot(cmd_args args) {
     cmd_ret ret;
     ret.errorcode = 0;
     outb(0x64, 0xFE);
+	while(1); // NO MORE DEAD CODE BUGS
     return ret;
 }
 
@@ -309,10 +310,21 @@ cmd_ret cmd_utc(cmd_args args) {
     cmd_ret ret;
     ret.errorcode = 0;
 	if(args.amount < 1) {
+        wsf("\nsd", "UTC: +", utc);
+		return ret;
+	}
+    s16 t_utc = str_to_int(args.args[0]);
+    if(t_utc != -1) utc = t_utc;
+    return ret;
+}
+
+cmd_ret cmd_format(cmd_args args) {
+    cmd_ret ret;
+    ret.errorcode = 0;
+	if(args.amount < 1 || args.args[0][15] == 0) {
         RET_ERRCODE(3, "Insufficient arguments");
 	}
-    utc = str_to_int(args.args[0]);
-    set_utc();
+	format(args.args[0]);
     return ret;
 }
 
@@ -341,4 +353,5 @@ run_cmd commands[] = {
     {cmd_time, "time"},
     {cmd_date, "date"},
     {cmd_utc, "utc"},
+    {cmd_format, "format"},
 };

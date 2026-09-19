@@ -2,11 +2,12 @@
 #define FS_H
 
 #include "in-out.h"
+#define MAX_CONTENT 16     // секторов данных на файл (пока без цепочек
 
 typedef struct {
 	char path[128];
 	u32 mark_s;
-	u32 content[8];
+	u32 content[16];
 } file;
 
 extern u8 inited;

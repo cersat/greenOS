@@ -5,8 +5,8 @@
 #include "lib/string.h"
 #include "lib/fs.h"
 #include "lib/command.h"
+#include "lib/settings.h"
 
-// В начало файла, после #include
 // В начало файла, после #include
 extern void idt_flush(u32);
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);  extern void isr3(void);
@@ -27,8 +27,6 @@ static void clear_bss(void)
     while (p < &bss_end_marker)
         *p++ = 0;
 }
-
-void *memset(void *dest, int val, unsigned int n);
 void execute(void);
 
 typedef struct {
@@ -72,7 +70,8 @@ void Cpanic(char *err) __attribute__((noreturn));
 void Cpanic(char *err) {
     VGA_COLOR = 0x4F;
     clear_screen();
-    wsf("sss", "                                     Kernel panic\n\n\nerr: ", err, "\npress any key to reboot");
+    wsf("sss", "                                     Kernel panic\n\n\n"
+        "err: ", err, "\npress any key to reboot");
     wait_keypress();
     outb(0x64, 0xFE);
     while(1);
@@ -103,35 +102,16 @@ u8 rtc_read(u8 reg) {
     }
 }
 
-void get_utc() {
-    u32 sector = findFile("/settings.bin");
-    if(sector) {
-        readFilePart(sector, 0, sector_buffer);
-        utc = sector_buffer[0];
-    }
-}
-
-void set_utc() {
-    u32 sector = findFile("/settings.bin");
-    if(sector) {
-        sector_buffer[0] = utc;
-        setFile(sector, 0, sector_buffer);
-    } else {
-        createFile("/settings.bin");
-        set_utc();
-    }
-}
-
 void run_script(u32 sector) {
     //readFilePart(sector, 0, sector_buffer);               // читаем сектор в sector_buffer
-    static u8 script_buffer[4096];
-    memset(script_buffer, 0, 4096);
+    static u8 script_buffer[MAX_CONTENT * 512];
+    memset(script_buffer, 0, MAX_CONTENT * 512);
 
     char rnum[128];
     int rcount = 0;// счетчик символов в rnum
     int i = 0;
     u16 strings = 0;
-    for (; i < 4096; i++) {
+    for (; i < MAX_CONTENT * 512; i++) {
         if(!(i % 512)) readFilePart(sector, i / 512, &script_buffer[i]);
         char c = script_buffer[i];
 
@@ -348,6 +328,54 @@ void write_sector(u32 lba) {
 #include "commands.inc"
 // f*ck preprocesor
 
+void compile_script(u32 *sectors, u32 dst) {
+    static u8 script_buffer[MAX_CONTENT * 512];
+    static u8 dst_buffer[MAX_CONTENT * 512];
+    memset(script_buffer, 0, MAX_CONTENT * 512);
+
+    char rnum[128];
+    int rcount = 0;// счетчик символов в rnum
+    int i = 0;
+    int sector_number = 0;
+    u32 dst_ptr = 0;
+    u16 strings = 0;
+    for (; i < MAX_CONTENT * 512; i++) {
+        if(!(i % 512)) readFilePart(sectors[sector_number], i / 512, &script_buffer[i]);
+        char c = script_buffer[i];
+
+        // Пропускаем пустые байты
+        if (!c) continue;
+        if ((u8)c == 0xFF) continue;
+
+        if (c == 10) {                       // символ конца команды
+            strings++;
+            rnum[rcount] = '\0';             // завершение строки
+            char *cmd;
+            char *args;
+            split_command(rnum, &cmd, &args);
+            int command = 0;
+
+            for(int i = 0; i < (int) sizeof(commands); i++) if(!strcmp(cmd, commands[i].name)) {command = i; break;}
+            if(command) {
+                dst_buffer[dst_ptr] = command;
+                dst_ptr++;
+                strcat((char *) &dst_buffer[dst_ptr], args);
+            } else {
+                wsf("ss", "Compilation error: invalid command: ", cmd);
+                return;
+            }
+            rcount = 0;                      // готовимся к следующей команде 
+        } else {
+            if (rcount < (int)sizeof(rnum)-1) {
+                rnum[rcount++] = c;  // добавляем символ в rnum
+            }
+        }
+    }
+    for(int i = 0; i < 8; i++) setFile(dst, i, &dst_buffer[i * 512]);
+    char buf[5];
+    wsf("ss", "\nCompilation finished in string ", int_to_str(strings, buf, sizeof(buf)));
+}
+
 void execute_command(command comm) {
     int i = 0;
     u8 found = 0;
@@ -383,7 +411,8 @@ void kmain(void) {
             clear_screen();
         }
     }
-    get_utc();
+    s16 t_utc = settings_read(0);
+    if(t_utc != -1) utc = t_utc;
 
     write_string("greenOS bootloader\npress any key to boot");
     wait_keypress();

@@ -8,4 +8,5 @@ os-image.bin
 *.bin
 *.elf
 *.error
+*.zip
 qemu.log

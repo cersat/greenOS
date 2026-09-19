@@ -3,7 +3,6 @@
 #include "in-out.h"
 #include "string.h"
 
-#define MAX_CONTENT      8     // секторов данных на файл (пока без цепочек)
 #define BITMAP_SECTOR    51    // где НАЧИНАЕТСЯ bitmap (фиксировано)
 #define SLOTS_PER_SECTOR 127   // marks в одном list-секторе (508 байт) + 4 байта на "next"
 

@@ -11,6 +11,12 @@ typedef __builtin_va_list va_list;
 // buffer - пустой массив с достаточным размером
 char *strcat(char *buffer, const char *str1);
 
+// buf - массив для результата, value - число
+char *bin_to_str(char *buf, u32 value);
+
+// buf - массив для результата, value - число, bits - количество выводимых битов
+char *bit_to_str(char *buf, u32 value, u8 bits);
+
 // n - число, buf - массив для результата, size - размер буфера
 // Функция пишет строку вида "0A", "FF" и т.д.
 char *hex_to_str(u8 n, char* buf, int size);
@@ -24,8 +30,9 @@ int str_to_int(const char* str);
 // Преобразует символ 0123456789abcdef в число
 u8 str_to_hex(char c);
 
-void *memset(void *dest, int val, unsigned int n);
-void *memcpy(void *dest, const void *src, unsigned int n);
+void *memset(volatile void *dest, int val, unsigned int n);
+void *memcpy(volatile void *dest, volatile const void *src, unsigned int n);
+
 int strcmp(const char* s1, const char* s2);
 char *cut(char *str, const char *needle);
 u32 strlen(const char *s);

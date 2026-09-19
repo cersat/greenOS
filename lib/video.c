@@ -9,7 +9,7 @@ u8 automs = 0;
 static volatile u8* const VGA = (volatile u8*)0xB8000;
 
 u16 cursor = 0;
-int VGA_COLOR = 0x2;
+u8 VGA_COLOR = 0x2;
 
 char num[256];
 int count = 0;
@@ -83,6 +83,14 @@ void move_screen() {
     }
 }
 
+void copy_screen(char *buf) {
+    memcpy(buf, VGA, VGA_HEIGHT * VGA_WIDTH);
+}
+
+void paste_screen(char *buf) {
+    memcpy(VGA, buf, VGA_HEIGHT * VGA_WIDTH);
+}
+
 void put_char_color(char c, int color) {
     int col = VGA_COLOR;
     VGA_COLOR = color;
@@ -119,9 +127,7 @@ void put_char(char c) {
     move_cursor();
 }
 
-void print_dec(u32 value)
-{
-    char hex_chars[] = "0123456789";
+void print_dec(u32 value) {
     int i = 2;
     if(value >= 10) i = 3;
     if(value >= 100) i = 4;
@@ -130,17 +136,10 @@ void print_dec(u32 value)
     char buffer[i];
 
     buffer[i - 1] = 0;
-
-    for(int j = i - 2; j >= 0; j--) {
-        buffer[j] = hex_chars[value % 10];
-        value /= 10;
-    }
-
-    write_string(buffer);
+    write_string(int_to_str(value, buffer, sizeof(buffer)));
 }
 
-void print_hex(u32 value)
-{
+void print_hex(u32 value) {
     char hex_chars[] = "0123456789ABCDEF";
     char buffer[9];
 
@@ -172,6 +171,64 @@ void write_string(const char* s) {
     while (*s) {
         put_char(*s++);
     }
+}
+
+void write_string_point(const char* s, int *x, int y) {
+    while (*s) {
+        set_char(*x++, y, *s++);
+    }
+}
+
+void wsf_point(int x, int y, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    while (*fmt) {
+        switch (*fmt) {
+            case 's': {
+                char *s = va_arg(args, char*);
+                write_string_point(s, &x, y);
+                break;
+            }
+            case 'd': {
+                int v = va_arg(args, int);
+                char buf[12];
+                write_string_point(int_to_str(v, buf, sizeof(buf)), &x, y);
+                break;
+            }
+            case 'x': {
+                u32 v = va_arg(args, u32);
+                char buf[9];
+                write_string_point(hex_to_str(v, buf, sizeof(buf)), &x, y);
+                break;
+            }
+            case 'b': {
+                u32 v = va_arg(args, u32);
+                char buf[33];
+                write_string_point(bin_to_str(buf, v), &x, y);
+                break;
+            }
+            case 'c': {
+                char c = (char)va_arg(args, int);
+                set_char(x++, y, c);
+                break;
+            }
+            case ' ': {
+                set_char(x++, y, ' ');
+                break;
+            }
+            case '\n': {
+               set_char(x++, y, '\n');
+                break;
+            }
+            default: {
+                break;
+            }
+        }
+        fmt++;
+    }
+
+    va_end(args);
 }
 
 void wsf(const char *fmt, ...) {

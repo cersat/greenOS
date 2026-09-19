@@ -13,6 +13,22 @@ char *strcat(char *buffer, const char *str) {
     return buffer;
 }
 
+char *bin_to_str(char *buf, u32 value) {
+    for(int i = 31; i >= 0; i--) {
+        u32 bit = (value >> i) & 1;
+        buf[i] = bit + '0';
+    }
+    return buf;
+}
+
+char *bit_to_str(char *buf, u32 value, u8 bits) {
+    for(int i = bits - 1; i >= 0; i--) {
+        u32 bit = (value >> i) & 1;
+        buf[i] = bit + '0';
+    }
+    return buf;
+}
+
 char *hex_to_str(u8 n, char* buf, int size) {
     if (size < 3) { // нужно как минимум 2 символа + '\0'
         if (size > 0) buf[0] = '\0';
@@ -104,24 +120,24 @@ u8 str_to_hex(char c) {
     return 0; // Если символ не hex-цифра
 }
 
-void *memset(void *dest, int val, unsigned int n) {
+void *memset(volatile void *dest, int val, unsigned int n) {
     unsigned char *ptr = (unsigned char*)dest;
 
     while(n--)
         *ptr++ = (unsigned char)val;
 
-    return dest;
+    return (void*)dest;
 }
 
-void *memcpy(void *dest, const void *src, unsigned int n) {
-    unsigned char *d = dest;
-    const unsigned char *s = src;
+void *memcpy(volatile void *dest, volatile const void *src, unsigned int n) {
+    volatile unsigned char *d = dest;
+    const volatile unsigned char *s = src;
 
     while(n--) {
         *d++ = *s++;
     }
 
-    return dest;
+    return (void*)dest;
 }
 
 int strcmp(const char* s1, const char* s2) {
